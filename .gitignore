@@ -1,0 +1,8 @@
+*.log
+*.csv
+*.npz
+*.plt
+__pycache__
+*.pyc
+*.txt
+outputs
