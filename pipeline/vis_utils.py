@@ -2,6 +2,19 @@ import matplotlib.pyplot as plt
 import os
 import json
 
+
+import numpy as np
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.float32, np.float64, np.float16)):
+            return float(obj)
+        if isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
+    
 def plot_training_curves(history, save_dir, exp_name):
     """
     Строит графики лосса, метрики MAE и Learning Rate.
@@ -22,10 +35,10 @@ def plot_training_curves(history, save_dir, exp_name):
     axes[0].grid(True)
 
     # 2. Metric Curves (Real MAE)
-    axes[1].plot(epochs, history['val_mae'], label='Val Real MAE', color='orange', marker='.')
+    axes[1].plot(epochs, history['val_mae_Z1'], label='Val Real MAE', color='orange', marker='.')
     axes[1].set_xlabel('Epochs')
     axes[1].set_ylabel('MAE (Concentration Units)')
-    axes[1].set_title('Validation MAE (Physical)')
+    axes[1].set_title('Validation MAE Z1 (Physical)')
     axes[1].legend()
     axes[1].grid(True)
 
@@ -47,6 +60,6 @@ def plot_training_curves(history, save_dir, exp_name):
     # Сохранение сырых данных (json), чтобы можно было перестроить график позже
     json_path = os.path.join(save_dir, f'{exp_name}_history.json')
     with open(json_path, 'w') as f:
-        json.dump(history, f, indent=4)
+        json.dump(history, f, indent=4, cls=NumpyEncoder)
         
     return plot_path

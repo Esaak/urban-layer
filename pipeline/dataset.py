@@ -13,7 +13,16 @@ class UrbanAirDataset(Dataset):
             mode: 'train' (80% + аугментации) или 'val' (20% без аугментаций)
             log_target: Применять ли log1p к концентрации (рекомендуется True)
         """
-        self.files = sorted(glob.glob(os.path.join(data_dir, '*.npz')))
+        self.files = []
+
+        if isinstance(data_dir, str):
+            self.files = sorted(glob.glob(os.path.join(data_dir, '*.npz')))
+            
+        elif isinstance(data_dir, list):
+            for d in data_dir:
+                self.files.extend(glob.glob(os.path.join(d, '*.npz')))
+            
+            self.files = sorted(self.files)
         
         # Детерминированное разбиение
         random.seed(42)
@@ -61,18 +70,32 @@ class UrbanAirDataset(Dataset):
             
             # Коррекция вектора ветра (каналы 4 и 5)
             # Внимание: np.rot90 вращает против часовой стрелки (Counter-Clockwise)
-            u = x[4].copy()
-            v = x[5].copy()
+            # u = x[4].copy()
+            # v = x[5].copy()
             
+            u = x[5].copy()
+            v = x[6].copy()
+            
+            # if k == 1:   # 90 deg CCW: (x, y) -> (-y, x)
+            #     x[4] = -v
+            #     x[5] = u
+            # elif k == 2: # 180 deg: (x, y) -> (-x, -y)
+            #     x[4] = -u
+            #     x[5] = -v
+            # elif k == 3: # 270 deg CCW: (x, y) -> (y, -x)
+            #     x[4] = v
+            #     x[5] = -u
+                
             if k == 1:   # 90 deg CCW: (x, y) -> (-y, x)
-                x[4] = -v
-                x[5] = u
-            elif k == 2: # 180 deg: (x, y) -> (-x, -y)
-                x[4] = -u
                 x[5] = -v
-            elif k == 3: # 270 deg CCW: (x, y) -> (y, -x)
-                x[4] = v
+                x[6] = u
+            elif k == 2: # 180 deg: (x, y) -> (-x, -y)
                 x[5] = -u
+                x[6] = -v
+            elif k == 3: # 270 deg CCW: (x, y) -> (y, -x)
+                x[5] = v
+                x[6] = -u
+
 
         # 2. Случайное отражение (Flip Left-Right)
         if random.random() > 0.5:
@@ -81,6 +104,8 @@ class UrbanAirDataset(Dataset):
             y = np.flip(y, axis=2).copy()
             
             # При отражении по X, компонента ветра X меняет знак
-            x[4] = -x[4]
+            # x[4] = -x[4]
+            x[5] = -x[5]
+            
             
         return x, y

@@ -16,7 +16,7 @@ def run_inference(data_dir, device='cuda'):
     exp_dir = get_latest_exp_dir()
     model_path = glob.glob(os.path.join(exp_dir, '*_best.pth'))[0]
     
-    model = UNet25D(n_channels=6, n_classes=5).to(device)
+    model = UNet25D(n_channels=7, n_classes=5).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()
 
@@ -77,4 +77,4 @@ def run_inference(data_dir, device='cuda'):
     print(f"Result saved to {save_name}")
 
 if __name__ == "__main__":
-    run_inference('/app/urban-layer-datasets/2026_01_19_500_25d_data/')
+    run_inference('/app/urban-layer-datasets/2026_01_19_500_25d_data_1/')

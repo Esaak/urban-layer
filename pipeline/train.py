@@ -27,7 +27,9 @@ class Trainer:
         self.logger.info(f"Experiment directory: {self.exp_dir}")
 
         # Модель, лосс, опт
-        self.model = UNet25D(n_channels=6, n_classes=5).to(self.device)
+        # self.model = UNet25D(n_channels=6, n_classes=5).to(self.device)
+        self.model = UNet25D(n_channels=7, n_classes=5).to(self.device)
+        
         #self.criterion = nn.MSELoss()
         self.criterion = self._criterion
 
@@ -35,8 +37,14 @@ class Trainer:
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=5)
         
         self.metrics = AirQualityMetrics()
-        self.history = {'train_loss': [], 'val_loss': [], 'val_mae': [], 'val_fb': [], 'val_r2': [], 'lr': []}
-
+        self.history = {'train_loss': [], 
+                        'val_loss': [], 
+                        'val_mae_Z1': [], 'val_mae_Z5': [], 'val_mae_Z8': [], 'val_mae_Z25': [], 'val_mae_Mean': [],
+                        'val_fb_Z1': [], 'val_fb_Z5': [], 'val_fb_Z8': [], 'val_fb_Z25': [], 'val_fb_Mean': [],
+                        'val_r2_Z1': [], 'val_r2_Z5': [], 'val_r2_Z8': [], 'val_r2_Z25': [], 'val_r2_Mean': [],
+                        'lr': []
+                        }
+        
     def _setup_logger(self):
         logger = logging.getLogger("UrbanAir")
         logger.setLevel(logging.INFO)
@@ -97,35 +105,57 @@ class Trainer:
                 loss = self.criterion(pred_log, y_log, x)
                 total_loss += loss.item()
                 
-                # Метрики в реальных величинах
+                # В реальные величины
                 pred_real = torch.clamp(torch.expm1(pred_log), min=0)
                 target_real = torch.expm1(y_log)
                 self.metrics.update(pred_real, target_real)
         
-        return total_loss / len(loader), self.metrics.compute()
-
+        # Теперь compute() возвращает две вещи
+        avg_m, per_layer_m = self.metrics.compute()
+        return total_loss / len(loader), avg_m, per_layer_m
+    
     def run(self, train_loader, val_loader):
         best_val_loss = float('inf')
         self.logger.info(f"Dataset size (samples): \n Train: {len(train_loader.dataset)} \n Val: {len(val_loader.dataset)}")
         for epoch in range(self.cfg['epochs']):
             train_loss = self.train_epoch(train_loader)
-            val_loss, m = self.validate(val_loader)
+            # val_loss, m = self.validate(val_loader)
+            
+            # self.scheduler.step(val_loss)
+            # current_lr = self.optimizer.param_groups[0]['lr']
+            
+            # # Логирование
+            # self.logger.info(f"Epoch {epoch+1:02d} | Loss: T={train_loss:.5f} V={val_loss:.5f} | "
+            #                  f"MAE: {m['mae']:.3f} | FB: {m['fb']:.3f} | R2: {m['r2']:.3f} | LR: {current_lr:.2e}")
+            
+            
+            val_loss, avg_m, per_layer_m = self.validate(val_loader)
             
             self.scheduler.step(val_loss)
             current_lr = self.optimizer.param_groups[0]['lr']
             
-            # Логирование
-            self.logger.info(f"Epoch {epoch+1:02d} | Loss: T={train_loss:.5f} V={val_loss:.5f} | "
-                             f"MAE: {m['mae']:.3f} | FB: {m['fb']:.3f} | R2: {m['r2']:.3f} | LR: {current_lr:.2e}")
+            # 1. Основной лог
+            self.logger.info(f"Epoch {epoch+1:02d} | Loss: V={val_loss:.5f} | "
+                            f"R2_Avg: {avg_m['r2']:.3f} | FB_Avg: {avg_m['fb']:.3f}")
+            
+            # 2. Послойный лог (только R2 для компактности)
+            r2_str = " | ".join([f"{name}: {m['r2']:.3f}" for name, m in per_layer_m.items()])
+            self.logger.info(f"R2 Layers: {r2_str}")
+            
+            # 3. Сохранение в историю
+            for name, m in per_layer_m.items():
+                self.history[f'val_r2_{name}'].append(m['r2'])
+                self.history[f'val_mae_{name}'].append(m['mae'])
+                self.history[f'val_fb_{name}'].append(m['fb'])    
             
             # Сохранение истории
             self.history['train_loss'].append(train_loss)
             self.history['val_loss'].append(val_loss)
-            self.history['val_mae'].append(m['mae'])
-            self.history['val_fb'].append(m['fb'])
-            self.history['val_r2'].append(m['r2'])
+            # self.history['val_mae'].append(m['mae'])
+            # self.history['val_fb'].append(m['fb'])
+            # self.history['val_r2'].append(m['r2'])
             self.history['lr'].append(current_lr)
-            
+
             plot_training_curves(self.history, self.exp_dir, self.cfg['exp_name'])
 
             if val_loss < best_val_loss:
@@ -134,11 +164,11 @@ class Trainer:
 
 if __name__ == "__main__":
     CONFIG = {
-        'data_dir': '/app/urban-layer-datasets/2026_01_19_500_25d_data/',
+        'data_dir': ['/app/urban-layer-datasets/2026_01_19_500_25d_data_1/', '/app/urban-layer-datasets/2026_01_19_500_25d_data_1/'],
         'base_outputs_dir': './outputs/',
         'batch_size': 128,
-        'lr': 5e-4,
-        'epochs': 50,
+        'lr': 5e-5,
+        'epochs': 100,
         'exp_name': 'unet_25d_v1',
         'device': 'cuda' if torch.cuda.is_available() else 'cpu'
     }

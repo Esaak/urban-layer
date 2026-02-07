@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 # --- НАСТРОЙКИ ---
 RAW_ROOT = '/app/urban-layer-datasets/'
-SAVE_ROOT = '/app/urban-layer-datasets/2026_01_27_500_25d_data' # '/app/urban-layer-datasets/2026_01_19_500_25d_data' 
+SAVE_ROOT = '/app/urban-layer-datasets/2026_01_19_500_25d_data_1' # '/app/urban-layer-datasets/2026_01_19_500_25d_data' , /app/urban-layer-datasets/2026_01_27_500_25d_data' 
 GRID_DIMS = {'z': 32, 'y': 128, 'x': 128}
 
 # Целевые слои для декодера
@@ -250,8 +250,12 @@ def process_experiment_25d(build_path, output_path):
 
         # === FEATURE 4: Source Height Map (2D) ===
         source_h_map = cfg.get_source_height_map(tracer_id, shape=(128, 128))
-
-        # === FEATURES 5 & 6: Wind ===
+        source_mask_inv = (source_h_map <= 0) 
+        # === FEATURE 5: Source SDF (2D) ===
+        source_sdf_2d = distance_transform_edt(source_mask_inv).astype(np.float32)        
+        source_sdf_2d /= 128.0 # Нормализация
+        
+        # === FEATURES 6 & 7: Wind ===
         wind_x = np.full((128, 128), cfg.wind_params['dPdx'], dtype=np.float32)
         wind_y = np.full((128, 128), cfg.wind_params['dPdy'], dtype=np.float32)
 
@@ -261,9 +265,10 @@ def process_experiment_25d(build_path, output_path):
             sdf_2d, 
             lai_map, 
             source_h_map, 
+            source_sdf_2d,
             wind_x, 
             wind_y
-        ], axis=0) # (6, 128, 128)
+        ], axis=0) # (7, 128, 128)
 
         # --- 3. Сборка Таргета Y (Multi-Channel 2D) ---
         target_slices = []
@@ -287,7 +292,7 @@ def process_experiment_25d(build_path, output_path):
         np.savez_compressed(os.path.join(SAVE_ROOT, save_fname), x=x_tensor, y=y_tensor)
 
 os.makedirs(SAVE_ROOT, exist_ok=True)
-all_outputs = glob.glob(os.path.join(RAW_ROOT, '2026_01_27_500_25d', 'output_*')) # '2026_01_19_500_25d'
+all_outputs = glob.glob(os.path.join(RAW_ROOT, '2026_01_19_500_25d', 'output_*')) # '2026_01_19_500_25d', '2026_01_27_500_25d'
 all_outputs.sort(key=os.path.getctime)
 
 print(f"Processing {len(all_outputs)} experiments into 2.5D dataset...")

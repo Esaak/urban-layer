@@ -8,18 +8,19 @@ class DoubleConv(nn.Module):
         super().__init__()
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True),
+            # nn.BatchNorm2d(out_ch),
+            nn.Mish(inplace=True),
             nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_ch),
-            nn.ReLU(inplace=True)
+            # nn.BatchNorm2d(out_ch),
+            nn.Mish(inplace=True)
         )
 
     def forward(self, x):
         return self.double_conv(x)
 
 class UNet25D(nn.Module):
-    def __init__(self, n_channels=6, n_classes=5):
+    # def __init__(self, n_channels=6, n_classes=5):
+    def __init__(self, n_channels=7, n_classes=5):
         super().__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
