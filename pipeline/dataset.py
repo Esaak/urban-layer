@@ -41,71 +41,119 @@ class UrbanAirDataset(Dataset):
     def __len__(self):
         return len(self.files)
 
+
+
     def __getitem__(self, idx):
         path = self.files[idx]
         data = np.load(path)
         
-        # x shape: (6, 128, 128) -> [BuildH, SDF, LAI, SourceH, WindX, WindY]
-        x = data['x'].astype(np.float32)
-        # y shape: (5, 128, 128) -> [Z1, Z5, Z8, Z25, Mean]
-        y = data['y'].astype(np.float32)
+        x = data['x'].astype(np.float32)      # (8, 128, 128)
+        y = data['y'].astype(np.float32)      # (5, 128, 128)
+        wind = data['wind'].astype(np.float32) # (3,) [cos, sin, mag]
         
-        # Аугментация (только для Train)
         if self.transform:
-            x, y = self._augment(x, y)
+            x, wind, y = self._augment(x, wind, y)
 
-        # Препроцессинг таргета (Log-space для стабилизации градиентов)
         if self.log_target:
             y = np.log1p(y)
             
-        return torch.from_numpy(x), torch.from_numpy(y)
-
-    def _augment(self, x, y):
-        # 1. Случайный поворот (0, 90, 180, 270)
+        return torch.from_numpy(x), torch.from_numpy(wind), torch.from_numpy(y)
+    
+    def _augment(self, x, wind, y):
         k = random.randint(0, 3)
         if k > 0:
-            # Вращаем пространственные оси (H, W) -> последние две (1, 2)
             x = np.rot90(x, k, axes=(1, 2)).copy()
             y = np.rot90(y, k, axes=(1, 2)).copy()
             
-            # Коррекция вектора ветра (каналы 4 и 5)
-            # Внимание: np.rot90 вращает против часовой стрелки (Counter-Clockwise)
-            # u = x[4].copy()
-            # v = x[5].copy()
+            # Поворот вектора (cos, sin) на k*90 градусов
+            # Угол поворота alpha = k * pi/2
+            # cos' = cos*cos(a) - sin*sin(a)
+            # sin' = cos*sin(a) + sin*cos(a)
+            c, s, mag = wind
+            if k == 1:   # 90 CCW: cos'=-sin, sin'=cos
+                wind[0], wind[1] = -s, c
+            elif k == 2: # 180: cos'=-cos, sin'=-sin
+                wind[0], wind[1] = -c, -s
+            elif k == 3: # 270 CCW: cos'=sin, sin'=-cos
+                wind[0], wind[1] = s, -c
             
-            u = x[5].copy()
-            v = x[6].copy()
-            
-            # if k == 1:   # 90 deg CCW: (x, y) -> (-y, x)
-            #     x[4] = -v
-            #     x[5] = u
-            # elif k == 2: # 180 deg: (x, y) -> (-x, -y)
-            #     x[4] = -u
-            #     x[5] = -v
-            # elif k == 3: # 270 deg CCW: (x, y) -> (y, -x)
-            #     x[4] = v
-            #     x[5] = -u
-                
-            if k == 1:   # 90 deg CCW: (x, y) -> (-y, x)
-                x[5] = -v
-                x[6] = u
-            elif k == 2: # 180 deg: (x, y) -> (-x, -y)
-                x[5] = -u
-                x[6] = -v
-            elif k == 3: # 270 deg CCW: (x, y) -> (y, -x)
-                x[5] = v
-                x[6] = -u
+            # Обновляем локальные каналы ветра (5 и 6)
+            x[5] = wind[0]
+            x[6] = wind[1]
 
-
-        # 2. Случайное отражение (Flip Left-Right)
         if random.random() > 0.5:
-            # Flip по последней оси (Width / X)
             x = np.flip(x, axis=2).copy()
             y = np.flip(y, axis=2).copy()
+            # Отражение по X: cos' = -cos, sin' = sin
+            wind[0] = -wind[0]
+            x[5] = wind[0]
             
-            # При отражении по X, компонента ветра X меняет знак
-            # x[4] = -x[4]
-            x[5] = -x[5]
+        return x, wind, y
+    # def __getitem__(self, idx):
+    #     path = self.files[idx]
+    #     data = np.load(path)
+        
+    #     # x shape: (6, 128, 128) -> [BuildH, SDF, LAI, SourceH, WindX, WindY]
+    #     x = data['x'].astype(np.float32)
+    #     # y shape: (5, 128, 128) -> [Z1, Z5, Z8, Z25, Mean]
+    #     y = data['y'].astype(np.float32)
+        
+    #     # Аугментация (только для Train)
+    #     if self.transform:
+    #         x, y = self._augment(x, y)
+
+    #     # Препроцессинг таргета (Log-space для стабилизации градиентов)
+    #     if self.log_target:
+    #         y = np.log1p(y)
+            
+    #     return torch.from_numpy(x), torch.from_numpy(y)
+
+    # def _augment(self, x, y):
+    #     # 1. Случайный поворот (0, 90, 180, 270)
+    #     k = random.randint(0, 3)
+    #     if k > 0:
+    #         # Вращаем пространственные оси (H, W) -> последние две (1, 2)
+    #         x = np.rot90(x, k, axes=(1, 2)).copy()
+    #         y = np.rot90(y, k, axes=(1, 2)).copy()
+            
+    #         # Коррекция вектора ветра (каналы 4 и 5)
+    #         # Внимание: np.rot90 вращает против часовой стрелки (Counter-Clockwise)
+    #         # u = x[4].copy()
+    #         # v = x[5].copy()
+            
+    #         u = x[5].copy()
+    #         v = x[6].copy()
+            
+    #         # if k == 1:   # 90 deg CCW: (x, y) -> (-y, x)
+    #         #     x[4] = -v
+    #         #     x[5] = u
+    #         # elif k == 2: # 180 deg: (x, y) -> (-x, -y)
+    #         #     x[4] = -u
+    #         #     x[5] = -v
+    #         # elif k == 3: # 270 deg CCW: (x, y) -> (y, -x)
+    #         #     x[4] = v
+    #         #     x[5] = -u
+                
+    #         if k == 1:   # 90 deg CCW: (x, y) -> (-y, x)
+    #             x[5] = -v
+    #             x[6] = u
+    #         elif k == 2: # 180 deg: (x, y) -> (-x, -y)
+    #             x[5] = -u
+    #             x[6] = -v
+    #         elif k == 3: # 270 deg CCW: (x, y) -> (y, -x)
+    #             x[5] = v
+    #             x[6] = -u
+
+
+    #     # 2. Случайное отражение (Flip Left-Right)
+    #     if random.random() > 0.5:
+    #         # Flip по последней оси (Width / X)
+    #         x = np.flip(x, axis=2).copy()
+    #         y = np.flip(y, axis=2).copy()
+            
+    #         # При отражении по X, компонента ветра X меняет знак
+    #         # x[4] = -x[4]
+    #         x[5] = -x[5]
             
             
-        return x, y
+    #     return x, y

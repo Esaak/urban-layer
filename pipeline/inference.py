@@ -16,19 +16,21 @@ def run_inference(data_dir, device='cuda'):
     exp_dir = get_latest_exp_dir()
     model_path = glob.glob(os.path.join(exp_dir, '*_best.pth'))[0]
     
-    model = UNet25D(n_channels=7, n_classes=5).to(device)
+    model = UNet25D(n_channels=8, n_classes=5).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()
 
     # 2. Выбор данных
     sample_path = random.choice(glob.glob(os.path.join(data_dir, '*.npz')))
     data = np.load(sample_path)
-    x, y_gt_log = data['x'], data['y']
+    x, y_gt_log, wind = data['x'], data['y'], data['wind']
     
     # 3. Предсказание
     x_tensor = torch.from_numpy(x).unsqueeze(0).float().to(device)
+    wind_tensor = torch.from_numpy(wind).unsqueeze(0).float().to(device)
+    
     with torch.no_grad():
-        pred_log = model(x_tensor)
+        pred_log = model(x_tensor, wind_tensor)
     
     pred_real = torch.clamp(torch.expm1(pred_log), min=0).squeeze().cpu().numpy()
     #y_gt_real = np.expm1(y_gt_log)
@@ -77,4 +79,4 @@ def run_inference(data_dir, device='cuda'):
     print(f"Result saved to {save_name}")
 
 if __name__ == "__main__":
-    run_inference('/app/urban-layer-datasets/2026_01_19_500_25d_data_1/')
+    run_inference('/app/urban-layer-datasets/2026_01_19_500_25d_data_2/')

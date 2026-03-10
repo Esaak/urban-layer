@@ -13,6 +13,15 @@ from model import UNet25D
 from vis_utils import plot_training_curves
 from metrics_utils import AirQualityMetrics
 
+
+def gradient_loss(pred, target):
+    dy_true = target[:, :, 1:, :] - target[:, :, :-1, :]
+    dy_pred = pred[:, :, 1:, :] - pred[:, :, :-1, :]
+    dx_true = target[:, :, :, 1:] - target[:, :, :, :-1]
+    dx_pred = pred[:, :, :, 1:] - pred[:, :, :, :-1]
+    return torch.mean(torch.abs(dy_true - dy_pred)) + torch.mean(torch.abs(dx_true - dx_pred))
+
+
 class Trainer:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -28,7 +37,7 @@ class Trainer:
 
         # Модель, лосс, опт
         # self.model = UNet25D(n_channels=6, n_classes=5).to(self.device)
-        self.model = UNet25D(n_channels=7, n_classes=5).to(self.device)
+        self.model = UNet25D(n_channels=8, n_classes=5).to(self.device)
         
         #self.criterion = nn.MSELoss()
         self.criterion = self._criterion
@@ -59,58 +68,112 @@ class Trainer:
     
     def _criterion(self, pred, target, x_input):
     # 1. Основной лосс (MSE на логах)
-        base_loss = F.mse_loss(pred, target)
-        mae = F.l1_loss(pred, target)
+       base_loss = F.mse_loss(pred, target)
+       mae = F.l1_loss(pred, target)
         
-        # 2. Штраф за "призраков" (концентрация внутри зданий)
-        # x_input[:, 0:1] — карта зданий [Batch, 1, 128, 128]
-        # pred[:, 0:2] — слои Z1 и Z5 [Batch, 2, 128, 128]
-        build_mask = (x_input[:, 0:1, :, :] > 0).float()
+       # 2. Штраф за "призраков" (концентрация внутри зданий)
+       # x_input[:, 0:1] — карта зданий [Batch, 1, 128, 128]
+       # pred[:, 0:2] — слои Z1 и Z5 [Batch, 2, 128, 128]
+       build_mask = (x_input[:, 0:1, :, :] > 0).float()
         
-        # Выделяем предсказания в нижних слоях
-        ground_layers = pred[:, 0:2, :, :]
+       # Выделяем предсказания в нижних слоях
+       ground_layers = pred[:, 0:2, :, :]
         
-        # Умножаем предсказания на маску зданий. 
-        # Там, где зданий нет, будет 0. Там, где есть — останется значение предсказания.
-        # Мы хотим, чтобы эти значения стремились к нулю.
-        ghost_values = ground_layers * build_mask
-        ghost_penalty = torch.mean(ghost_values ** 2)
+       # Умножаем предсказания на маску зданий. 
+       # Там, где зданий нет, будет 0. Там, где есть — останется значение предсказания.
+       # Мы хотим, чтобы эти значения стремились к нулю.
+       ghost_values = ground_layers * build_mask
+       ghost_penalty = torch.mean(ghost_values ** 2)
         
-        # Итоговый лосс с весовым коэффициентом
-        return 1.0 * base_loss + 0.05 * mae + 0.1 * ghost_penalty
+       # Итоговый лосс с весовым коэффициентом
+       return 1.0 * base_loss + 0.05 * mae + 0.1 * ghost_penalty
+    
+    
+    
+    # def _criterion(self, pred, target, x_input):
+    #     # 1. Weighted MSE на логах
+    #     # Усиливаем веса там, где в таргете высокие значения (шлейф)
+    #     weights = torch.exp(target) 
+    #     weights = weights / weights.mean()
+    #     mse_loss = torch.mean(weights * (pred - target)**2)
+        
+    #     # 2. Gradient Loss для четкости шлейфа
+    #     g_loss = gradient_loss(pred, target)
+        
+    #     # 3. Ghost Penalty (в зданиях концентрация 0)
+    #     build_mask = (x_input[:, 0:1, :, :] > 0).float()
+    #     ghost_penalty = torch.mean((pred[:, 0:2, :, :] * build_mask) ** 2)
+        
+    #     # Комбинируем
+    #     return 1.0 * mse_loss + 2.0 * g_loss + 0.1 * ghost_penalty
+    
+    # def train_epoch(self, loader):
+    #     self.model.train()
+    #     total_loss = 0
+    #     for x, y in tqdm(loader, desc="Training", leave=False):
+    #         x, y = x.to(self.device), y.to(self.device)
+    #         self.optimizer.zero_grad()
+    #         pred = self.model(x)
+    #         loss = self.criterion(pred, y, x)
+    #         loss.backward()
+    #         self.optimizer.step()
+    #         total_loss += loss.item()
+    #     return total_loss / len(loader)
     
 
+    # def validate(self, loader):
+    #     self.model.eval()
+    #     self.metrics.reset()
+    #     total_loss = 0
+    #     with torch.no_grad():
+    #         for x, y_log in tqdm(loader, desc="Validation", leave=False):
+    #             x, y_log = x.to(self.device), y_log.to(self.device)
+    #             pred_log = self.model(x)
+                
+    #             loss = self.criterion(pred_log, y_log, x)
+    #             total_loss += loss.item()
+                
+    #             # В реальные величины
+    #             pred_real = torch.clamp(torch.expm1(pred_log), min=0)
+    #             target_real = torch.expm1(y_log)
+    #             self.metrics.update(pred_real, target_real)
+        
+    #     # Теперь compute() возвращает две вещи
+    #     avg_m, per_layer_m = self.metrics.compute()
+    #     return total_loss / len(loader), avg_m, per_layer_m
+    
     def train_epoch(self, loader):
         self.model.train()
         total_loss = 0
-        for x, y in tqdm(loader, desc="Training", leave=False):
-            x, y = x.to(self.device), y.to(self.device)
+        for x, wind, y in tqdm(loader, desc="Training"):
+            x, wind, y = x.to(self.device), wind.to(self.device), y.to(self.device)
+            
             self.optimizer.zero_grad()
-            pred = self.model(x)
-            loss = self.criterion(pred, y, x)
+            # Теперь передаем ДВА аргумента в модель
+            pred = self.model(x, wind)
+            loss = self._criterion(pred, y, x)
+            
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
         return total_loss / len(loader)
-
+    
     def validate(self, loader):
         self.model.eval()
         self.metrics.reset()
         total_loss = 0
         with torch.no_grad():
-            for x, y_log in tqdm(loader, desc="Validation", leave=False):
-                x, y_log = x.to(self.device), y_log.to(self.device)
-                pred_log = self.model(x)
+            for x, wind, y_log in loader:
+                x, wind, y_log = x.to(self.device), wind.to(self.device), y_log.to(self.device)
+                pred_log = self.model(x, wind)
                 
-                loss = self.criterion(pred_log, y_log, x)
+                loss = self._criterion(pred_log, y_log, x)
                 total_loss += loss.item()
                 
-                # В реальные величины
                 pred_real = torch.clamp(torch.expm1(pred_log), min=0)
                 target_real = torch.expm1(y_log)
                 self.metrics.update(pred_real, target_real)
         
-        # Теперь compute() возвращает две вещи
         avg_m, per_layer_m = self.metrics.compute()
         return total_loss / len(loader), avg_m, per_layer_m
     
@@ -164,11 +227,11 @@ class Trainer:
 
 if __name__ == "__main__":
     CONFIG = {
-        'data_dir': ['/app/urban-layer-datasets/2026_01_19_500_25d_data_1/', '/app/urban-layer-datasets/2026_01_19_500_25d_data_1/'],
+        'data_dir': ['/app/urban-layer-datasets/2026_01_19_500_25d_data_2/', '/app/urban-layer-datasets/2026_01_19_500_25d_data_2/'],
         'base_outputs_dir': './outputs/',
         'batch_size': 128,
         'lr': 5e-5,
-        'epochs': 100,
+        'epochs': 200,
         'exp_name': 'unet_25d_v1',
         'device': 'cuda' if torch.cuda.is_available() else 'cpu'
     }
